@@ -1,1 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AirPaint - Hand Tracking Drawing</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #fff;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+            background: linear-gradient(45deg, #00d4ff, #7c3aed, #f472b6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .instructions {
+            margin-bottom: 15px;
+            text-align: center;
+            font-size: 0.9rem;
+            color: #a0aec0;
+            max-width: 600px;
+        }
+
+        .instructions span {
+            display: inline-block;
+            margin: 3px 8px;
+            padding: 4px 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            font-size: 0.85rem;
+        }
+
+        .container {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        #videoElement {
+            display: block;
+            transform: scaleX(-1);
+        }
+
+        #drawCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            transform: scaleX(-1);
+            pointer-events: none;
+        }
+
+        #overlayCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            transform: scaleX(-1);
+            pointer-events: none;
+        }
+
+        .status-bar {
+            margin-top: 15px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            font-size: 0.9rem;
+        }
+
+        .color-preview {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: 2px solid white;
+        }
+
+        .size-preview {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .size-dot {
+            background: white;
+            border-radius: 50%;
+        }
+
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+        }
+
+        #clearBtn {
+            background: #ef4444;
+            color: white;
+        }
+
+        #clearBtn:hover {
+            background: #dc2626;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .gesture-indicator {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 8px 16px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 20px;
+            font-size: 0.9rem;
+            z-index: 10;
+            transform: scaleX(-1);
+        }
+    </style>
+</head>
+<body>
+    <h1>🎨 AirPaint</h1>
+    <div class="instructions">
+        <span>✏️ Pinch index+thumb to draw</span>
+        <span>✌️ Peace sign to change color</span>
+        <span>🖐️ Open hand + rotate for size</span>
+        <span>👊 Fist to stop drawing</span>
+    </div>
+    
+    <div class="container" id="container">
+        <div class="loading" id="loading">
+            <div class="loading-spinner"></div>
+            <p>Loading hand tracking...</p>
+        </div>
+        <video id="videoElement" autoplay playsinline></video>
+        <canvas id="drawCanvas"></canvas>
+        <canvas id="overlayCanvas"></canvas>
+        <div class="gesture-indicator" id="gestureIndicator">Waiting for hand...</div>
+    </div>
+    
+    <div class="status-bar">
+        <div class="status-item">
+            <span>Color:</span>
+            <div class="color-preview" id="colorPreview"></div>
+        </div>
+        <div class="status-item">
+            <span>Size:</span>
+            <div class="size-preview">
+                <div class="size-dot" id="sizePreview"></div>
+            </div>
+        </div>
+        <div class="status-item" id="drawingStatus">
+            <span>Mode:</span>
+            <span id="modeText">Idle</span>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <button id="clearBtn">🗑️ Clear Canvas</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js"></script>
+    
+    <script>
+        // Canvas and video elements
+        const video = document.getElementById('videoElement');
+        const drawCanvas = document.getElementById('drawCanvas');
+        const overlayCanvas = document.getElementById('overlayCanvas');
+        const drawCtx = drawCanvas.getContext('2d');
+        const overlayCtx = overlayCanvas.getContext('2d');
+        const container = document.getElementById('container');
+        const loading = document.getElementById('loading');
+        const gestureIndicator = document.getElementById('gestureIndicator');
+        const colorPreview = document.getElementById('colorPreview');
+        const sizePreview = document.getElementById('sizePreview');
+        const modeText = document.getElementById('modeText');
+        const clearBtn = document.getElementById('clearBtn');
+
+        // Drawing state
+        let isDrawing = false;
+        let lastPoint = null;
+        let currentColor = '#00d4ff';
+        let currentSize = 8;
+        let colorIndex = 0;
+        let lastGesture = null;
+        let gestureDebounce = 0;
+
+        // Available colors
+        const colors = [
+            '#00d4ff', // Cyan
+            '#7c3aed', // Purple
+            '#f472b6', // Pink
+            '#ef4444', // Red
+            '#f97316', // Orange
+            '#eab308', // Yellow
+            '#22c55e', // Green
+            '#ffffff', // White
+            '#000000'  // Black
+        ];
+
+        // Set up canvas dimensions
+        const WIDTH = 640;
+        const HEIGHT = 480;
+
+        function setupCanvas() {
+            video.width = WIDTH;
+            video.height = HEIGHT;
+            drawCanvas.width = WIDTH;
+            drawCanvas.height = HEIGHT;
+            overlayCanvas.width = WIDTH;
+            overlayCanvas.height = HEIGHT;
+            
+            // Fill draw canvas with white background
+            drawCtx.fillStyle = 'white';
+            drawCtx.fillRect(0, 0, WIDTH, HEIGHT);
+            
+            updateUI();
+        }
+
+        function updateUI() {
+            colorPreview.style.background = currentColor;
+            sizePreview.style.width = Math.max(4, currentSize) + 'px';
+            sizePreview.style.height = Math.max(4, currentSize) + 'px';
+        }
+
+        // Calculate distance between two landmarks
+        function getDistance(landmark1, landmark2) {
+            const dx = landmark1.x - landmark2.x;
+            const dy = landmark1.y - landmark2.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        // Check if finger is extended
+        function isFingerExtended(landmarks, fingerTip, fingerPip) {
+            const tip = landmarks[fingerTip];
+            const pip = landmarks[fingerPip];
+            const mcp = landmarks[fingerPip - 1];
+            
+            // Finger is extended if tip is above PIP (in Y coordinate, lower is higher on screen)
+            return tip.y < pip.y && pip.y < mcp.y;
+        }
+
+        // Detect hand gestures
+        function detectGesture(landmarks) {
+            // Key landmarks
+            const thumb_tip = landmarks[4];
+            const index_tip = landmarks[8];
+            const middle_tip = landmarks[12];
+            const ring_tip = landmarks[16];
+            const pinky_tip = landmarks[20];
+            const wrist = landmarks[0];
+            const index_mcp = landmarks[5];
+
+            // Check if fingers are extended
+            const thumbExtended = thumb_tip.x < landmarks[3].x; // For right hand mirrored
+            const indexExtended = isFingerExtended(landmarks, 8, 6);
+            const middleExtended = isFingerExtended(landmarks, 12, 10);
+            const ringExtended = isFingerExtended(landmarks, 16, 14);
+            const pinkyExtended = isFingerExtended(landmarks, 20, 18);
+
+            // Distance between thumb and index finger tip
+            const pinchDistance = getDistance(thumb_tip, index_tip);
+
+            // Pinch gesture for drawing (thumb and index close together)
+            if (pinchDistance < 0.05) {
+                return {
+                    type: 'pinch',
+                    position: {
+                        x: (thumb_tip.x + index_tip.x) / 2,
+                        y: (thumb_tip.y + index_tip.y) / 2
+                    }
+                };
+            }
+
+            // Peace sign (index and middle extended, others closed) - change color
+            if (indexExtended && middleExtended && !ringExtended && !pinkyExtended) {
+                return { type: 'peace' };
+            }
+
+            // Open hand (all fingers extended) - adjust size based on rotation
+            if (indexExtended && middleExtended && ringExtended && pinkyExtended) {
+                // Calculate hand rotation angle based on wrist to index MCP line
+                const angle = Math.atan2(index_mcp.y - wrist.y, index_mcp.x - wrist.x);
+                const angleDegrees = angle * (180 / Math.PI);
+                
+                return {
+                    type: 'openhand',
+                    rotation: angleDegrees
+                };
+            }
+
+            // Fist (no fingers clearly extended) - stop drawing
+            if (!indexExtended && !middleExtended && !ringExtended && !pinkyExtended) {
+                return { type: 'fist' };
+            }
+
+            // Pointing (just index extended) - cursor mode
+            if (indexExtended && !middleExtended && !ringExtended && !pinkyExtended) {
+                return {
+                    type: 'point',
+                    position: {
+                        x: index_tip.x,
+                        y: index_tip.y
+                    }
+                };
+            }
+
+            return { type: 'unknown' };
+        }
+
+        // Draw on canvas
+        function drawLine(from, to) {
+            drawCtx.beginPath();
+            drawCtx.strokeStyle = currentColor;
+            drawCtx.lineWidth = currentSize;
+            drawCtx.lineCap = 'round';
+            drawCtx.lineJoin = 'round';
+            drawCtx.moveTo(from.x * WIDTH, from.y * HEIGHT);
+            drawCtx.lineTo(to.x * WIDTH, to.y * HEIGHT);
+            drawCtx.stroke();
+        }
+
+        // Draw cursor overlay
+        function drawCursor(x, y, isDrawingMode) {
+            overlayCtx.clearRect(0, 0, WIDTH, HEIGHT);
+            
+            // Draw cursor circle
+            overlayCtx.beginPath();
+            overlayCtx.arc(x * WIDTH, y * HEIGHT, currentSize / 2 + 5, 0, Math.PI * 2);
+            overlayCtx.strokeStyle = isDrawingMode ? currentColor : 'rgba(255, 255, 255, 0.8)';
+            overlayCtx.lineWidth = 2;
+            overlayCtx.stroke();
+            
+            if (isDrawingMode) {
+                // Fill inner circle when drawing
+                overlayCtx.beginPath();
+                overlayCtx.arc(x * WIDTH, y * HEIGHT, currentSize / 2, 0, Math.PI * 2);
+                overlayCtx.fillStyle = currentColor;
+                overlayCtx.fill();
+            }
+        }
+
+        // Draw hand landmarks
+        function drawLandmarks(landmarks) {
+            // Draw connections
+            const connections = [
+                [0, 1], [1, 2], [2, 3], [3, 4], // Thumb
+                [0, 5], [5, 6], [6, 7], [7, 8], // Index
+                [0, 9], [9, 10], [10, 11], [11, 12], // Middle
+                [0, 13], [13, 14], [14, 15], [15, 16], // Ring
+                [0, 17], [17, 18], [18, 19], [19, 20], // Pinky
+                [5, 9], [9, 13], [13, 17] // Palm
+            ];
+
+            overlayCtx.strokeStyle = 'rgba(0, 212, 255, 0.5)';
+            overlayCtx.lineWidth = 2;
+            
+            for (const [i, j] of connections) {
+                overlayCtx.beginPath();
+                overlayCtx.moveTo(landmarks[i].x * WIDTH, landmarks[i].y * HEIGHT);
+                overlayCtx.lineTo(landmarks[j].x * WIDTH, landmarks[j].y * HEIGHT);
+                overlayCtx.stroke();
+            }
+
+            // Draw landmarks
+            for (let i = 0; i < landmarks.length; i++) {
+                overlayCtx.beginPath();
+                overlayCtx.arc(
+                    landmarks[i].x * WIDTH,
+                    landmarks[i].y * HEIGHT,
+                    4,
+                    0,
+                    Math.PI * 2
+                );
+                overlayCtx.fillStyle = i === 4 || i === 8 ? '#f472b6' : '#00d4ff';
+                overlayCtx.fill();
+            }
+        }
+
+        // Process hand tracking results
+        function onResults(results) {
+            overlayCtx.clearRect(0, 0, WIDTH, HEIGHT);
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Draw hand skeleton
+                drawLandmarks(landmarks);
+                
+                // Detect gesture
+                const gesture = detectGesture(landmarks);
+                gestureDebounce--;
+                
+                switch (gesture.type) {
+                    case 'pinch':
+                        gestureIndicator.textContent = '✏️ Drawing';
+                        modeText.textContent = 'Drawing';
+                        
+                        drawCursor(gesture.position.x, gesture.position.y, true);
+                        
+                        if (lastPoint) {
+                            drawLine(lastPoint, gesture.position);
+                        }
+                        lastPoint = gesture.position;
+                        isDrawing = true;
+                        break;
+                        
+                    case 'peace':
+                        gestureIndicator.textContent = '🎨 Change Color';
+                        modeText.textContent = 'Color Select';
+                        
+                        if (lastGesture !== 'peace' && gestureDebounce <= 0) {
+                            colorIndex = (colorIndex + 1) % colors.length;
+                            currentColor = colors[colorIndex];
+                            updateUI();
+                            gestureDebounce = 15; // Debounce for ~0.5 seconds
+                        }
+                        lastPoint = null;
+                        isDrawing = false;
+                        break;
+                        
+                    case 'openhand':
+                        gestureIndicator.textContent = '🖐️ Adjust Size';
+                        modeText.textContent = 'Size Adjust';
+                        
+                        // Map rotation to size (rotation ranges roughly from -90 to 90)
+                        // Normalize to 2-50 pixel range
+                        const normalizedRotation = (gesture.rotation + 90) / 180;
+                        currentSize = Math.max(2, Math.min(50, normalizedRotation * 48 + 2));
+                        updateUI();
+                        
+                        // Show size preview cursor
+                        const indexTip = landmarks[8];
+                        drawCursor(indexTip.x, indexTip.y, false);
+                        
+                        lastPoint = null;
+                        isDrawing = false;
+                        break;
+                        
+                    case 'fist':
+                        gestureIndicator.textContent = '👊 Paused';
+                        modeText.textContent = 'Paused';
+                        lastPoint = null;
+                        isDrawing = false;
+                        break;
+                        
+                    case 'point':
+                        gestureIndicator.textContent = '👆 Pointing';
+                        modeText.textContent = 'Cursor';
+                        drawCursor(gesture.position.x, gesture.position.y, false);
+                        lastPoint = null;
+                        isDrawing = false;
+                        break;
+                        
+                    default:
+                        gestureIndicator.textContent = '🤔 Unknown gesture';
+                        modeText.textContent = 'Unknown';
+                        lastPoint = null;
+                        isDrawing = false;
+                }
+                
+                lastGesture = gesture.type;
+            } else {
+                gestureIndicator.textContent = '👋 Show your hand';
+                modeText.textContent = 'No hand detected';
+                lastPoint = null;
+                isDrawing = false;
+                lastGesture = null;
+            }
+        }
+
+        // Clear canvas
+        clearBtn.addEventListener('click', () => {
+            drawCtx.fillStyle = 'white';
+            drawCtx.fillRect(0, 0, WIDTH, HEIGHT);
+        });
+
+        // Initialize MediaPipe Hands
+        async function init() {
+            try {
+                setupCanvas();
+                
+                const hands = new Hands({
+                    locateFile: (file) => {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`;
+                    }
+                });
+
+                hands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.7,
+                    minTrackingConfidence: 0.5
+                });
+
+                hands.onResults(onResults);
+
+                // Set up camera
+                const camera = new Camera(video, {
+                    onFrame: async () => {
+                        await hands.send({ image: video });
+                    },
+                    width: WIDTH,
+                    height: HEIGHT
+                });
+
+                await camera.start();
+                loading.style.display = 'none';
+                
+            } catch (error) {
+                console.error('Error initializing:', error);
+                loading.innerHTML = `
+                    <p style="color: #ef4444;">❌ Error: ${error.message}</p>
+                    <p style="margin-top: 10px; font-size: 0.9rem;">
+                        Please ensure camera access is allowed.
+                    </p>
+                `;
+            }
+        }
+
+        // Start the application
+        init();
+    </script>
+</body>
+</html>
