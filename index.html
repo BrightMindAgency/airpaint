@@ -243,6 +243,14 @@
         let lastGesture = null;
         let gestureDebounce = 0;
 
+        // Configuration constants
+        const MIN_PEN_SIZE = 2;
+        const MAX_PEN_SIZE = 50;
+        const ROTATION_RANGE_DEGREES = 180; // Range from -90 to +90 degrees
+        const ROTATION_OFFSET_DEGREES = 90; // Offset to normalize rotation
+        const GESTURE_DEBOUNCE_FRAMES = 15; // ~0.5 seconds at 30fps
+        const PINCH_THRESHOLD = 0.05; // Distance threshold for pinch detection
+
         // Available colors
         const colors = [
             '#00d4ff', // Cyan
@@ -310,7 +318,10 @@
             const index_mcp = landmarks[5];
 
             // Check if fingers are extended
-            const thumbExtended = thumb_tip.x < landmarks[3].x; // For right hand mirrored
+            // For thumb: compare tip to IP joint position relative to palm orientation
+            // This works for both left and right hands by checking thumb tip distance from wrist
+            const thumbIP = landmarks[3];
+            const thumbExtended = getDistance(thumb_tip, wrist) > getDistance(thumbIP, wrist);
             const indexExtended = isFingerExtended(landmarks, 8, 6);
             const middleExtended = isFingerExtended(landmarks, 12, 10);
             const ringExtended = isFingerExtended(landmarks, 16, 14);
@@ -320,7 +331,7 @@
             const pinchDistance = getDistance(thumb_tip, index_tip);
 
             // Pinch gesture for drawing (thumb and index close together)
-            if (pinchDistance < 0.05) {
+            if (pinchDistance < PINCH_THRESHOLD) {
                 return {
                     type: 'pinch',
                     position: {
@@ -471,7 +482,7 @@
                             colorIndex = (colorIndex + 1) % colors.length;
                             currentColor = colors[colorIndex];
                             updateUI();
-                            gestureDebounce = 15; // Debounce for ~0.5 seconds
+                            gestureDebounce = GESTURE_DEBOUNCE_FRAMES;
                         }
                         lastPoint = null;
                         isDrawing = false;
@@ -481,10 +492,11 @@
                         gestureIndicator.textContent = '🖐️ Adjust Size';
                         modeText.textContent = 'Size Adjust';
                         
-                        // Map rotation to size (rotation ranges roughly from -90 to 90)
-                        // Normalize to 2-50 pixel range
-                        const normalizedRotation = (gesture.rotation + 90) / 180;
-                        currentSize = Math.max(2, Math.min(50, normalizedRotation * 48 + 2));
+                        // Map rotation to size (rotation ranges roughly from -90 to 90 degrees)
+                        // Normalize to MIN_PEN_SIZE-MAX_PEN_SIZE pixel range
+                        const normalizedRotation = (gesture.rotation + ROTATION_OFFSET_DEGREES) / ROTATION_RANGE_DEGREES;
+                        const sizeRange = MAX_PEN_SIZE - MIN_PEN_SIZE;
+                        currentSize = Math.max(MIN_PEN_SIZE, Math.min(MAX_PEN_SIZE, normalizedRotation * sizeRange + MIN_PEN_SIZE));
                         updateUI();
                         
                         // Show size preview cursor
